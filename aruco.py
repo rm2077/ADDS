@@ -5,6 +5,9 @@ import glob
 import numpy as np
 import pickle
 import argparse
+
+print("OpenCV version:", cv2.__version__)
+
 ARUCO_DICT = {
 	"DICT_4X4_50": cv2.aruco.DICT_4X4_50,
 	"DICT_4X4_100": cv2.aruco.DICT_4X4_100,
@@ -34,15 +37,29 @@ ARUCO_DICT = {
 
 def arucoMarkerDetection(tag, cam_mat, dst):
     cap = cv2.VideoCapture(1)
-    
+    offset_left, offset_right, offset_up, offset_down = 0, 0, 0, 0
     while cap.isOpened():
         
         ret, img = cap.read()
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT[tag])
         params = cv2.aruco.DetectorParameters()
         detector = cv2.aruco.ArucoDetector(aruco_dict, params)
+        
 
+        Xframe = img.shape[1]
+        Yframe = img.shape[0]
+        frameCenter = (Xframe // 2, Yframe // 2)
+        centerRectCoordX1 = (Xframe//2) - 200
+        centerRectCoordX2 = (Xframe//2) + 200
+        centerRectCoordY1 = (Yframe//2) - 200
+        centerRectCoordY2 = (Yframe//2) + 200
         markerCorners, ids, rejectedCandidates = detector.detectMarkers(img)
+        cv2.line(img, (0,Yframe//2), (Xframe,Yframe//2), (255,255,255), 2) #X axis
+        cv2.line(img, (Xframe//2,0), (Xframe//2,Yframe), (255,255,255), 2)
+        cv2.rectangle(img, ((Xframe//2) - 200, (Yframe//2) + 200), ((Xframe//2) + 200, (Yframe//2) - 200), color=(0, 255, 0), thickness=2)
+        cv2.circle(img, (int(1920/2), int(1080/2)), radius=3, color=(0, 255, 0), thickness=3)
+        cv2.putText(img, f"Left: {offset_left}, Right: {offset_right}, Up: {offset_up}, Down: {offset_down}", org=(200, 50), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(0,255,0), thickness=3)
         if not markerCorners:
             print("No markers detected...")
 
@@ -59,6 +76,11 @@ def arucoMarkerDetection(tag, cam_mat, dst):
                 cv2.line(img, bottom_right, bottom_left, color=(0, 255, 0))
                 cv2.line(img, bottom_left, top_left, color=(0,255,0))
                 cv2.putText(img, str(int(id)), org=(top_left[0], top_left[1]-10), fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=1, color=(255,0,0), thickness=3)
+                cx = int((bottom_right[0] + bottom_left[0]) / 2)
+                cy = int((bottom_left[1] + top_left[1]) / 2)
+                
+
+                
                 cv2.circle(img, (int((bottom_right[0] + bottom_left[0]) / 2), int((bottom_left[1] + top_left[1]) / 2)), radius=3, color=(255, 0, 0), thickness=3)
                 marker_size = 0.01
                 marker_points = np.array([[-marker_size / 2, marker_size / 2, 0],
@@ -67,12 +89,59 @@ def arucoMarkerDetection(tag, cam_mat, dst):
                               [-marker_size / 2, -marker_size / 2, 0]], dtype=np.float32)
 
                 ret, rvec, tvec = cv2.solvePnP(marker_points, corner, cam_mat, dst)
+                print(tvec)
+                
                 if ret:
-                    cv2.drawFrameAxes(img, cam_mat, dst, rvec, tvec, 0.1)
+                    cv2.drawFrameAxes(img, cam_mat, dst, rvec, tvec, 0.01 * 0.5)
+            
+                if cx > centerRectCoordX1 and cx < centerRectCoordX2 and cy > centerRectCoordY1 and cy < centerRectCoordY2:
+                    offset_up = 0 
+                    offset_down = 0
+                    offset_left = 0
+                    offset_right = 0
+                    cv2.putText(img, "IN CENTER FRAME", org=(300, 300), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(255, 0, 0), thickness=10)
+                    if (tvec[2] < 0.045) or tvec[0] < -0.01:
+                        cv2.putText(img, "RELEASING LATCH", org=(300, 400), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, color=(255, 0, 0), thickness=10)
+                        
+                    
+                else:
+                    if cx < frameCenter[0] and cy < frameCenter[1]:
+                        print("In the top left")
+                        offset_up = 0
+                        offset_down = frameCenter[1] - cy
+                        offset_left = 0
+                        offset_right = frameCenter[0] - cx
+                        
+                        print("Move down: ", frameCenter[1] - cy)
+                        print("Move right: ", frameCenter[0] - cx)
+                    elif cx < frameCenter[0] and cy > frameCenter[1]:
+                        print("In the bottom left")
+                        offset_up = cy - frameCenter[1]
+                        offset_down = 0
+                        offset_left = 0
+                        offset_right = frameCenter[0] - cx
+                        
 
-                #rvec, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(corner, 0.05, cam_mat, dst)
-                #cv2.drawFrameAxes(img, cam_mat, dst, rvec, tvec, 0.1)
-            print("Marker #", id, "detected")
+                        print("Move up: ", cy - frameCenter[1])
+                        print("Move right: ", frameCenter[0] - cx)
+                    elif cx > frameCenter[0] and cy > frameCenter[1]:
+                        offset_up = cy - frameCenter[1]
+                        offset_down = 0
+                        offset_left = cx - frameCenter[0]
+                        offset_right = 0
+                        print("In the bottom right")
+                        print("Move up: ", cy - frameCenter[1])
+                        print("Move left: ", cx - frameCenter[0])
+                    elif cx > frameCenter[0] and cy < frameCenter[1]:
+                        offset_up = 0
+                        offset_down = frameCenter[1] - cy
+                        offset_left = cx - frameCenter[0]
+                        offset_right = 0
+                        print("In the top right")
+                        print("Move down: ", frameCenter[1] - cy)
+                        print("Move left: ", cx - frameCenter[0])
+                
+            
         cv2.imshow('Aruco Computer Vision', img)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -162,4 +231,8 @@ with open("matrices/cameraMatrix.pkl", "rb") as file:
 with open("matrices/distortionMatrix.pkl", "rb") as file:
     dMatrix = pickle.load(file)
 
-arucoMarkerDetection("DICT_6X6_250", cMatrix, dMatrix)
+arucoMarkerDetection("DICT_4X4_250", cMatrix, dMatrix)
+
+
+#1 Meters up
+#1.5 Meters distance
